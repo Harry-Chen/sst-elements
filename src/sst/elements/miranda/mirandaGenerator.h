@@ -23,6 +23,8 @@
 #include <sst/core/output.h>
 
 #include <queue>
+#include <list>
+#include <map>
 
 namespace SST {
 namespace Miranda {
@@ -77,6 +79,10 @@ public:
 	void setIssueTime(const uint64_t now) {
 		issueTime = now;
 	}
+
+	std::vector<uint64_t>& depends() {
+		return dependsOn;
+	}
 protected:
 	uint64_t reqID;
 	uint64_t issueTime;
@@ -86,33 +92,33 @@ protected:
 template<typename QueueType>
 class MirandaRequestQueue {
 public:
-       	MirandaRequestQueue() {
-                        theQ = (QueueType*) malloc(sizeof(QueueType) * 16);
-                        maxCapacity = 16;
-                        curSize = 0;
-                }
-        ~MirandaRequestQueue() {
-               	free(theQ);
-        }
+	MirandaRequestQueue() {
+		theQ = (QueueType*) malloc(sizeof(QueueType) * 16);
+		maxCapacity = 16;
+		curSize = 0;
+	}
+	~MirandaRequestQueue() {
+		free(theQ);
+	}
 
-        bool empty() const {
-               	return 0 == curSize;
-        }
+	bool empty() const {
+		return 0 == curSize;
+	}
 
-        void resize(const uint32_t newSize) {
-//		printf("Resizing MirandaQueue from: %" PRIu32 " to %" PRIu32 "\n",
-//			curSize, newSize);
+	void resize(const uint32_t newSize) {
+		//		printf("Resizing MirandaQueue from: %" PRIu32 " to %" PRIu32 "\n",
+		//			curSize, newSize);
 
-               	QueueType * newQ = (QueueType *) malloc(sizeof(QueueType) * newSize);
-               	for(uint32_t i = 0; i < curSize; ++i) {
-                       	newQ[i] = theQ[i];
-                }
+		QueueType * newQ = (QueueType *) malloc(sizeof(QueueType) * newSize);
+		for(uint32_t i = 0; i < curSize; ++i) {
+			newQ[i] = theQ[i];
+		}
 
-                free(theQ);
-               	theQ = newQ;
-               	maxCapacity = newSize;
-               	curSize = std::min(curSize, newSize);
-        }
+		free(theQ);
+		theQ = newQ;
+		maxCapacity = newSize;
+		curSize = std::min(curSize, newSize);
+	}
 
 	uint32_t size() const {
 		return curSize;
@@ -122,110 +128,110 @@ public:
 		return maxCapacity;
 	}
 
-       	QueueType at(const uint32_t index) {
-               	return theQ[index];
-       	}
+	QueueType at(const uint32_t index) {
+		return theQ[index];
+	}
 
-       	void erase(const std::vector<uint32_t> eraseList) {
+	void erase(const std::vector<uint32_t> eraseList) {
 		if(0 == eraseList.size()) {
 			return;
 		}
 
-               	QueueType* newQ = (QueueType*) malloc(sizeof(QueueType) * maxCapacity);
+		QueueType* newQ = (QueueType*) malloc(sizeof(QueueType) * maxCapacity);
 
-               	uint32_t nextSkipIndex = 0;
-               	uint32_t nextSkip = eraseList.at(nextSkipIndex);
-                uint32_t nextNewQIndex = 0;
+		uint32_t nextSkipIndex = 0;
+		uint32_t nextSkip = eraseList.at(nextSkipIndex);
+		uint32_t nextNewQIndex = 0;
 
-               	for(uint32_t i = 0; i < curSize; ++i) {
-                       	if(nextSkip == i) {
-                                nextSkipIndex++;
+		for(uint32_t i = 0; i < curSize; ++i) {
+			if(nextSkip == i) {
+				nextSkipIndex++;
 
-                                if(nextSkipIndex >= eraseList.size()) {
-                                       	nextSkip = curSize;
-                               	} else {
-                                       	nextSkip = eraseList.at(nextSkipIndex);
-                                }
-                       	} else {
-                               	newQ[nextNewQIndex] = theQ[i];
-                                nextNewQIndex++;
-                       	}
-               	}
+				if(nextSkipIndex >= eraseList.size()) {
+					nextSkip = curSize;
+				} else {
+					nextSkip = eraseList.at(nextSkipIndex);
+				}
+			} else {
+				newQ[nextNewQIndex] = theQ[i];
+				nextNewQIndex++;
+			}
+		}
 
-                free(theQ);
+		free(theQ);
 
-               	theQ = newQ;
+		theQ = newQ;
 		curSize = nextNewQIndex;
-        }
+	}
 
 	void push_back(QueueType t) {
-                if(curSize == maxCapacity) {
-                        resize(maxCapacity + 16);
-                }
+		if(curSize == maxCapacity) {
+			resize(maxCapacity * 2);
+		}
 
-                theQ[curSize] = t;
-                curSize++;
-        }
+		theQ[curSize] = t;
+		curSize++;
+	}
 private:
-        QueueType* theQ;
-        uint32_t maxCapacity;
-        uint32_t curSize;
+	QueueType* theQ;
+	uint32_t maxCapacity;
+	uint32_t curSize;
 };
 
 class MemoryOpRequest : public GeneratorRequest {
-public:
-        MemoryOpRequest(const uint64_t cAddr,
-		const uint64_t cLength,
-		const ReqOperation cOpType) :
-		GeneratorRequest(),
-		addr(cAddr), length(cLength), op(cOpType) {}
-	~MemoryOpRequest() {}
-	ReqOperation getOperation() const { return op; }
-	bool isRead() const { return op == READ; }
-	bool isWrite() const { return op == WRITE; }
-        bool isCustom() const { return op == CUSTOM; }
-	uint64_t getAddress() const { return addr; }
-	uint64_t getLength() const { return length; }
+	public:
+		MemoryOpRequest(const uint64_t cAddr,
+				const uint64_t cLength,
+				const ReqOperation cOpType) :
+			GeneratorRequest(),
+			addr(cAddr), length(cLength), op(cOpType) {}
+		~MemoryOpRequest() {}
+		ReqOperation getOperation() const { return op; }
+		bool isRead() const { return op == READ; }
+		bool isWrite() const { return op == WRITE; }
+		bool isCustom() const { return op == CUSTOM; }
+		uint64_t getAddress() const { return addr; }
+		uint64_t getLength() const { return length; }
 
-protected:
-	uint64_t addr;
-	uint64_t length;
-	ReqOperation op;
+	protected:
+		uint64_t addr;
+		uint64_t length;
+		ReqOperation op;
 };
 
 class CustomOpRequest : public MemoryOpRequest {
-public:
-    CustomOpRequest(const uint64_t cAddr,
-            const uint64_t cLength,
-            const uint32_t cOpcode) :
-        MemoryOpRequest(cAddr, cLength, CUSTOM) {
-            opcode = cOpcode;
-        }
-    ~CustomOpRequest() {}
-    uint32_t getOpcode() const { return opcode; }
+	public:
+		CustomOpRequest(const uint64_t cAddr,
+				const uint64_t cLength,
+				const uint32_t cOpcode) :
+			MemoryOpRequest(cAddr, cLength, CUSTOM) {
+				opcode = cOpcode;
+			}
+		~CustomOpRequest() {}
+		uint32_t getOpcode() const { return opcode; }
 
-protected:
-    uint32_t opcode;
+	protected:
+		uint32_t opcode;
 };
 
 class FenceOpRequest : public GeneratorRequest {
-public:
-	FenceOpRequest() : GeneratorRequest() {}
-	~FenceOpRequest() {}
-	ReqOperation getOperation() const { return REQ_FENCE; }
+	public:
+		FenceOpRequest() : GeneratorRequest() {}
+		~FenceOpRequest() {}
+		ReqOperation getOperation() const { return REQ_FENCE; }
 };
 
 class RequestGenerator : public SubComponent {
 
-public:
-    SST_ELI_REGISTER_SUBCOMPONENT_API(SST::Miranda::RequestGenerator)
+	public:
+		SST_ELI_REGISTER_SUBCOMPONENT_API(SST::Miranda::RequestGenerator)
 
-	RequestGenerator( Component* owner, Params& params) : SubComponent(owner) {}
-	RequestGenerator( ComponentId_t id, Params& params) : SubComponent(id) {}
-	~RequestGenerator() {}
-	virtual void generate(MirandaRequestQueue<GeneratorRequest*>* q) { }
-	virtual bool isFinished() { return true; }
-	virtual void completed() { }
+			RequestGenerator( Component* owner, Params& params) : SubComponent(owner) {}
+		RequestGenerator( ComponentId_t id, Params& params) : SubComponent(id) {}
+		~RequestGenerator() {}
+		virtual void generate(MirandaRequestQueue<GeneratorRequest*>* q) { }
+		virtual bool isFinished() { return true; }
+		virtual void completed() { }
 
 };
 

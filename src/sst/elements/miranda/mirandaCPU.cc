@@ -244,9 +244,14 @@ void RequestGenCPU::handleEvent( Interfaces::SimpleMem::Request* ev) {
 				cpuReq->getOriginalReqID(), (getCurrentSimTimeNano() - cpuReq->getIssueTime()));
 
 			// Notify every pending request that there may be a satisfied dependency
-			for(uint32_t i = 0; i < pendingRequests.size(); ++i) {
+			/* for(uint32_t i = 0; i < pendingRequests.size(); ++i) {
 				pendingRequests.at(i)->satisfyDependency(cpuReq->getOriginalReqID());
+			}*/
+			auto id = cpuReq->getOriginalReqID();
+			for (auto req : callbacks[id]) {
+				req->satisfyDependency(id);
 			}
+			callbacks.erase(callbacks.find(id));
 
 			delete cpuReq;
 		}
@@ -430,79 +435,93 @@ bool RequestGenCPU::clockTick(SST::Cycle_t cycle) {
         if( reqGen->isFinished()) {
             break;
     	} else {
-            reqGen->generate(&pendingRequests);
+			MirandaRequestQueue<GeneratorRequest*> newque;
+            reqGen->generate(&newque);
+			for (int i = 0; i < newque.size(); ++i) {
+				auto nxtRq = newque.at(i);
+				pendingRequests.push_back(nxtRq);
+				for (auto v : nxtRq->depends()) {
+					callbacks[v].push_back(nxtRq);
+				}
+			}
     	}
     }
     
-    for(uint32_t i = 0; i < pendingRequests.size(); ++i) {
-        if(reqsIssuedThisCycle == reqMaxPerCycle) {
-            statMaxIssuePerCycle->addData(1);
-            break;
-    	}
+	bool fwd;
+	int loopCounter = 0;
+	for (auto i = pendingRequests.begin(); i != pendingRequests.end(); fwd ? ++i : i, ++loopCounter) {
+		fwd = true;
+    // for(uint32_t i = 0; i < pendingRequests.size(); ++i) {
+		if(reqsIssuedThisCycle == reqMaxPerCycle) {
+			statMaxIssuePerCycle->addData(1);
+			break;
+		}
 
-	// Only a certain number of lookups are allowed, if we exceed this then we
-        // must exit the issue loop
-    	if(i == maxOpLookup) {
-            out->verbose(CALL_INFO, 2, 0, "Hit maximum reorder limit this cycle, no further operations will issue.\n");
-            statCyclesHitReorderLimit->addData(1);
-            break;
-    	}
+		// Only a certain number of lookups are allowed, if we exceed this then we
+		// must exit the issue loop
+		if(loopCounter == maxOpLookup) {
+			out->verbose(CALL_INFO, 2, 0, "Hit maximum reorder limit this cycle, no further operations will issue.\n");
+			statCyclesHitReorderLimit->addData(1);
+			break;
+		}
 
-        MemoryOpRequest* memOpReq;
-	GeneratorRequest* nxtRq = pendingRequests.at(i);
+		MemoryOpRequest* memOpReq;
+		GeneratorRequest* nxtRq = *i; 
 
-	if(nxtRq->getOperation() == REQ_FENCE) {
-            if(0 == requestsInFlight.size()) {
-		out->verbose(CALL_INFO, 4, 0, "Fence operation completed, no pending requests, will be retired.\n");
-                
-                // Keep record we will delete fence at i
-    		delReqs.push_back(i);
-		
-                // Delete the fence
-    		delete nxtRq;
-            } else {
-                out->verbose(CALL_INFO, 4, 0, "Fence operation in flight (>0 pending requests), stall.\n");
-            }
-            
-            statCyclesHitFence->addData(1);
-            
-            // Fence operations do now allow anything else to complete in this cycle
-            break;
+		if(nxtRq->getOperation() == REQ_FENCE) {
+			if(0 == requestsInFlight.size()) {
+				out->verbose(CALL_INFO, 4, 0, "Fence operation completed, no pending requests, will be retired.\n");
 
-        } else if ( ( memOpReq = dynamic_cast<MemoryOpRequest*>(nxtRq) ) ) {
+				// Keep record we will delete fence at i
+				// delReqs.push_back(i);
+				i = pendingRequests.erase(i);
+				fwd = false;
 
-            if( requestsPending[memOpReq->getOperation()] < maxRequestsPending[memOpReq->getOperation()] ) {
-                out->verbose(CALL_INFO, 4, 0, "Will attempt to issue as free slots in the load/store unit.\n");
+				// Delete the fence
+				delete nxtRq;
+			} else {
+				out->verbose(CALL_INFO, 4, 0, "Fence operation in flight (>0 pending requests), stall.\n");
+			}
+
+			statCyclesHitFence->addData(1);
+
+			// Fence operations do now allow anything else to complete in this cycle
+			break;
+
+		} else if ( ( memOpReq = dynamic_cast<MemoryOpRequest*>(nxtRq) ) ) {
+
+			if( requestsPending[memOpReq->getOperation()] < maxRequestsPending[memOpReq->getOperation()] ) {
+				out->verbose(CALL_INFO, 4, 0, "Will attempt to issue as free slots in the load/store unit.\n");
 
 
-		if(nxtRq->canIssue()) {
-                    issued = true;
-                    reqsIssuedThisCycle++;
-                    
-                    out->verbose(CALL_INFO, 4, 0, "Request %" PRIu64 " encountered, cleared to be issued, %" PRIu32 " issued this cycle.\n",
-                            nxtRq->getRequestID(), reqsIssuedThisCycle);
+				if(nxtRq->canIssue()) {
+					issued = true;
+					reqsIssuedThisCycle++;
 
-    		    // Keep record we will delete at index i
-                    delReqs.push_back(i);
-                    
-                    //MemoryOpRequest* memOpReq = dynamic_cast<MemoryOpRequest*>(nxtRq);
-                    issueRequest(memOpReq);
-                    
-                    delete nxtRq;
+					out->verbose(CALL_INFO, 4, 0, "Request %" PRIu64 " encountered, cleared to be issued, %" PRIu32 " issued this cycle.\n",
+							nxtRq->getRequestID(), reqsIssuedThisCycle);
+
+					// Keep record we will delete at index i
+					// delReqs.push_back(i);
+					i = pendingRequests.erase(i);
+					fwd = false;
+
+					//MemoryOpRequest* memOpReq = dynamic_cast<MemoryOpRequest*>(nxtRq);
+					issueRequest(memOpReq);
+
+					delete nxtRq;
+				} else {
+					out->verbose(CALL_INFO, 4, 0, "Request %" PRIu64 " in queue, has dependencies which are not satisfied, wait.\n",
+							nxtRq->getRequestID());
+				}
+			} else {
+				out->verbose(CALL_INFO, 4, 0, "All load/store/custom slots occupied, no more issues will be attempted.\n");
+				break;
+			}
 		} else {
-                    out->verbose(CALL_INFO, 4, 0, "Request %" PRIu64 " in queue, has dependencies which are not satisfied, wait.\n",
-                            nxtRq->getRequestID());
-                }
-    	    } else {
-                out->verbose(CALL_INFO, 4, 0, "All load/store/custom slots occupied, no more issues will be attempted.\n");
-    	        break;
-            }
-	} else {
-            out->fatal(CALL_INFO, -1, "Error, invalid operation \n");
-        }
-    }
-
-    pendingRequests.erase(delReqs);
+			out->fatal(CALL_INFO, -1, "Error, invalid operation \n");
+		}
+	}
 
     if(issued) {
 	statCyclesWithIssue->addData(1);
