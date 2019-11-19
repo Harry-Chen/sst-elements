@@ -132,7 +132,7 @@ private:
 	Link* srcLink;
 	MirandaReqEvent* srcReqEvent;	
 
-	MirandaRequestQueue<GeneratorRequest*> pendingRequests;
+	std::list<GeneratorRequest*> pendingRequests;
 	MirandaMemoryManager* memMgr;
         
         SharedRegion * addrMap;
@@ -142,6 +142,8 @@ private:
 	uint32_t reqMaxPerCycle;
 	uint64_t cacheLine;
 	uint32_t maxOpLookup;
+
+	std::unordered_map<uint64_t, std::vector<GeneratorRequest*> > callbacks;
 
         Statistic<uint64_t>* statReqs[OPCOUNT];
 	Statistic<uint64_t>* statSplitReqs[OPCOUNT];
